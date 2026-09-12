@@ -1,190 +1,309 @@
-# SOLUTION.md — BemaHub Software Engineer Assessment
+TASK 1
 
-**Name:**
-**Date:**
-**Actual time spent:**
+Course List — /courses
 
----
+What I did
 
-## 1. What I completed
+After confirming that the frontend and backend were running, I checked the existing project setup before adding anything new. I checked the API client configuration, the environment variable naming, whether TanStack Query was already installed, and whether the application already had a query provider. The provider was already present, so I did not create a duplicate global setup.
 
-| Task | Status | Evidence file |
-|---|---|---|
-| 1 — Course list | done | evidence/task-1-ui.png, evidence/task-1-network.png |
-| 2 — Authentication | done | evidence/task-2-signedout.png, evidence/task-2-signedin.png, evidence/task-2-network.png |
-| 3 — Withdrawal form | done | evidence/task-3-validation.png, evidence/task-3-success.png |
-| 4 — PHP defects | 4 of 4 found | evidence/task-4-curl.txt, evidence/task-4-permission-403.png, evidence/task-4-contract-fixed.png |
-| 5 — Database | done | evidence/task-5-queries.txt, evidence/task-5-terminal.png, answers/task-5.md |
-| 6 — Infrastructure | not attempted | |
-| 7 — Python | done | evidence/task-7-output.txt |
+I then built the /courses feature with a small separation of concerns: the API call, the React Query hook, and the presentation components were kept apart. The page shows the title, instructor, price, enrolment count, and rating for each course.
 
-## 2. What I did NOT finish, and how I would approach it
+How I handled the requirements
 
-*Being straight here scores better than pretending. Tell us what you would do
-next and roughly how long you think it would take.*
+• I used TanStack React Query for the request rather than useEffect plus fetch.
 
-## 3. Task 4 — the defects
+• Loading, error, and empty states are separate. A failed request does not look like an empty successful result.
 
-For each: what it was, why it is wrong, what you changed, how you proved it.
+• I used explicit null checks for enrolmentCount and averageRating so null and 0 do not render the same way.
 
-**Defect 1 (permission):**
-- **What it was:** Route `GET /wp-json/bemalearn/v1/me/earnings` registered `'permission_callback' => [$this, 'check_authenticated']`.
-- **Why it is wrong:** `check_authenticated` only verified that the caller had a valid JWT token, allowing learners (`subscriber` role) to query instructor earnings. The contract explicitly dictates: *"A learner's token must receive 403, not an empty result."*
-- **What changed:** In `wordpress-plugin/includes/class-bl-earnings-controller.php`, changed the permission callback on line 24 to `[$this, 'check_instructor']`.
-- **How proved:** Queried `GET /me/earnings` with a learner token (`learner@example.test`). Before the fix, the response was HTTP `200 OK` with balance data (`{"availableMinor":0...}`). After the fix, the endpoint correctly returned HTTP `403 Forbidden` (`{"code":"forbidden","message":"Instructors only."}`). Documented in `evidence/task-4-curl.txt`.
+• Pastry Fundamentals shows the unknown/null state, while Cake Decorating Basics keeps its real 0.0 rating.
 
-**Defect 2 (schema):**
-- **What it was:** In `BL_Courses_Controller::get_course()`, the single-course route attempted to read `$row->lessons_total`.
-- **Why it is wrong:** The database table `wp_bl_courses` defined in `class-bl-migrations.php` and `001_initial.sql` has column `lesson_count`, not `lessons_total`. Accessing a non-existent property silently returned `null`, causing `lessonCount` in the API response to default to `0`.
-- **What changed:** In `wordpress-plugin/includes/class-bl-courses-controller.php`, updated property access to: `$shaped['lessonCount'] = (int) ($row->lesson_count ?? 0);`.
-- **How proved:** Ran `curl -i http://localhost:8080/wp-json/bemalearn/v1/courses/1`. Before the fix, `lessonCount` returned `0`. After the fix, it returned `12` (the actual lesson count in the database). Documented in `evidence/task-4-curl.txt`.
+• Prices are formatted with the shared lib/format.ts utility instead of dividing by 100 inside the component.
 
-**Defect 3 (contract):**
-- **What it was:** `BL_Courses_Controller::get_courses()` queried courses without filtering by publication status (`WHERE c.is_published = 1`).
-- **Why it is wrong:** The public catalog endpoint (`GET /courses`) returned unpublished courses (specifically course ID 5, *"Advanced Laminated Dough"* with `is_published: 0` and `published_at: null`), leaking private drafts to prospective learners in violation of the contract.
-- **What changed:** In `wordpress-plugin/includes/class-bl-courses-controller.php`, added `WHERE c.is_published = 1` to the SQL query.
-- **How proved:** Ran `curl -i http://localhost:8080/wp-json/bemalearn/v1/courses`. Before the fix, 5 courses were returned, including the unpublished draft. After the fix, exactly 4 published courses were returned. Documented in `evidence/task-4-curl.txt`.
+• I used the supplied TypeScript response types and avoided any.
 
-**Defect 4 (validation):**
-- **What it was:** In `BL_Earnings_Controller::create_withdrawal()`, the endpoint failed to validate that `amountMinor >= self::MINIMUM_WITHDRAWAL_MINOR` (50,000 minor units / ₦500.00).
-- **Why it is wrong:** An instructor could submit a withdrawal for amounts below the threshold (e.g. 1000 minor units = ₦10.00), bypassing the documented business threshold and creating micro-payouts.
-- **What changed:** In `wordpress-plugin/includes/class-bl-earnings-controller.php`, added validation logic before balance checks:
-  ```php
-  if ($amount < self::MINIMUM_WITHDRAWAL_MINOR) {
-      return new WP_Error(
-          'below_minimum',
-          'The requested amount is below the minimum withdrawal.',
-          ['status' => 422]
-      );
-  }
-  ```
-- **How proved:** Sent `POST /me/withdrawals` with `{"amountMinor": 1000, "payoutReference": "wd_below_min_test"}`. Before the fix, the server created the withdrawal returning HTTP `201 Created`. After the fix, it rejected the request with HTTP `422 Unprocessable Entity` and code `below_minimum`. Documented in `evidence/task-4-curl.txt`.
+• I used previewExpiresInSeconds as the server-owned freshness window for the query rather than hardcoding a different frontend TTL.
 
-## 4. Specific questions
+Unpublished course observation
 
-**Task 1:** How did you handle `previewExpiresInSeconds`, and why?
+During the first verification, the API returned Advanced Laminated Dough even though it was unpublished. I did not add a frontend filter to hide it because the contract says the backend endpoint itself must only return published courses. I noted the issue and handled the actual fix in Task 4.
 
-In TanStack React Query (`useCourses` hook), `previewExpiresInSeconds` returned by `GET /courses` was used to dynamically control query freshness and background revalidation:
-1. **`staleTime`**: Set to `previewExpiresInSeconds * 1000` (300,000 ms / 5 minutes). This informs React Query that the catalog snapshot is guaranteed fresh for the server-specified TTL, preventing superfluous background refetches on component remounts or window refocus within that window.
-2. **`refetchInterval`**: Set to `previewExpiresInSeconds * 1000`. Once the preview window expires, React Query automatically triggers a background poll to fetch the updated catalog data so learners and instructors never see stale pricing, enrolments, or publication statuses.
-3. **UX Controls**: The UI also provides an explicit "Refresh" button triggering `refetch()` for on-demand user revalidation, along with a subtle TTL indicator.
+What I personally verified
 
-**Task 2:** Authentication, Session Interceptors & Error Isolation
+• Opened /courses in the browser and checked the rendered course cards.
 
-- **What Was Implemented:**
-  - `/login` route (`frontend/app/login/page.tsx`) with `LoginForm` posting credentials to `POST /auth/login`.
-  - Dynamic navigation (`components/Navigation.tsx`): hides "Sign In" when authenticated, shows "Earnings", instructor name, and "Sign Out". Hides "Earnings" when unauthenticated.
-  - Route guards: `/login` automatically redirects signed-in users to `/earnings`. Unauthenticated visits to `/earnings` trigger `GET /me/earnings` and render the house-style error state (`StatusMessage state="error"`).
-  - Protected `/earnings` view: renders available balance, pending balance, and dynamic minimum withdrawal threshold using `formatMoney()`.
-- **How Auth State Is Stored:**
-  - Auth state is managed via Zustand in `lib/auth/authStore.ts` and synced to `localStorage` (`bl_token` and `bl_user`).
-  - Hydrated on application mount in `app/providers.tsx` (`useAuthStore.getState().hydrate()`) to preserve sessions across page refreshes.
-  - The token is never manually written to headers in UI components; the Axios request interceptor reads `getStoredToken()` and automatically attaches `Authorization: Bearer <token>`.
-- **How the Interceptor Works:**
-  - *Request Interceptor:* Injects `Bearer <token>` on all outgoing requests if present in `localStorage`.
-  - *Response Interceptor (`lib/api/client.ts`):*
-    - Isolates transport failures (`!error.response`) so offline or DNS/server crashes are not misreported as credential errors.
-    - Intercepts `401 Unauthorized` responses and automatically calls `useAuthStore.getState().signOut()` to purge invalid or expired credentials.
-- **Distinguishing 401, 403, and Transport Failure:**
-  - *Transport Failure (`!error.response`):* `error.response` is `undefined`. The UI reports that the backend server is unreachable.
-  - *401 Unauthorized (`status === 401`):* Unauthenticated or expired session. The page renders an explicit error (`StatusMessage state="error"`: *"Sign in to continue."*) with a direct "Sign In to Continue" button.
-  - *403 Forbidden (`status === 403`):* Authenticated but lacking permission (e.g. learner role). Displays an access restriction notice.
-- **Learner Account Observation (Contract Mismatch):**
-  - Logging in with `learner@example.test` and querying `GET /me/earnings` returned **`200 OK`** with zero balance instead of the contract-mandated **`403 Forbidden`**.
-  - Traced in `class-bl-earnings-controller.php`: line 24 sets `'permission_callback' => [$this, 'check_authenticated']` instead of `[$this, 'check_instructor']`. This is Defect 1 (permission) for Task 4.
-- **Sign Out Verification:**
-  - Clicking "Sign Out" executes `useSignOut()`, which purges `useAuthStore` (`localStorage`) AND calls `queryClient.removeQueries({ queryKey: ["earnings"] })`.
-  - Verified that `/earnings` immediately reverts to the red error state (`StatusMessage state="error"`), cache is completely emptied, and previous balances are never revealed.
+• Checked the DevTools Network response for GET /courses.
 
-**Task 3:** Why must `payoutReference` be generated once per attempt rather than regenerated on retry? What would break?
+• Verified the null-versus-zero cases against the seeded values.
 
-In financial and transactional systems, `payoutReference` acts as an **idempotency key**. If the network disconnects after the server has processed the withdrawal and deducted the ledger, but before the HTTP response reaches the browser, the client encounters an in-flight uncertainty. If the client generated a new `payoutReference` on retry, the backend would treat it as a distinct, novel withdrawal request and move money a second time (double-payout). 
+• Verified the formatted Naira values.
 
-By generating `payoutReference` once per user submission attempt and attaching it both in the JSON payload and as the `Idempotency-Key` header, the database unique index on `payout_reference` intercepts any retry, halts duplicate deduction, and safely returns the existing record (HTTP 200).
+• Ran the TypeScript checks during the frontend work.
 
-**Task 5.2:** Why did the unique key fail to prevent duplicates, and why add a
-new migration rather than editing the old one?
+Evidence
 
-The original unique key was defined as `UNIQUE KEY uq_reference (instructor_id, payout_reference, cancelled_at)`. In standard MySQL/InnoDB (following ANSI SQL specifications), `NULL` values are treated as distinct; therefore, two rows with identical `instructor_id` and `payout_reference` can coexist indefinitely as long as `cancelled_at` is `NULL`. Because active/pending withdrawals naturally have `cancelled_at = NULL`, the constraint completely failed to protect against duplicate submissions.
+• evidence/task-1-ui.png
 
-A new forward-only migration (`002_fix_withdrawal_reference.sql`) was added instead of editing `001_initial.sql` because `001_initial.sql` was already executed against running environments. In relational database lifecycle management, modifying an already-applied migration rewrites deployment history, creates drift, and leaves existing databases unpatched. A forward migration ensures that existing environments transition deterministically to the corrected schema (`UNIQUE KEY uq_reference (instructor_id, payout_reference)`).
+• evidence/task-1-network.png
 
-**Task 7:** `"fee_minor": null` — zero fee, or error? Why?
+AI usage for Task 1
 
-I chose to treat `"fee_minor": null` as a zero fee (`0`) because in financial reconciliation workflows, null fee fields typically indicate that a transaction was fee-exempt or platform-subsidized rather than corrupted, allowing operations to safely calculate net instructor disbursements without blocking automated batch reconciliation; in a production accounting pipeline, these records would simultaneously be flagged as non-blocking anomalies for manual review.
+I used Google Antigravity and ChatGPT to review the feature structure and the edge cases in the brief. I accepted the React Query and feature-structure suggestions because they matched the existing application setup. I rejected the idea of hiding the unpublished course in the frontend because that would only cover up a backend contract defect. I personally ran and checked the final behavior.
 
-## 5. Anything wrong in our brief
+TASK 2
 
-*Did you find an ambiguity, contradiction or mistake in the contract or the
-tasks? Tell us. This scores positively.*
+Authentication and Protected Earnings
 
-- **Task 1 & Task 4 (Unpublished course returned by public endpoint):** The contract states that unpublished courses must never appear in `GET /courses`. However, the seed data includes an unpublished course (`Advanced Laminated Dough`, `is_published: 0`) and `BL_Courses_Controller::get_courses()` lacks a `WHERE is_published = 1` condition. As noted in `TASK-1-FRONTEND-LIST.md`, this is an intentional backend defect for Task 4. The frontend renders the data returned by the API but transparently highlights the unpublished status to make this defect immediately visible.
-- **Task 2 & Task 4 (Learner gets 200 OK instead of 403 on `/me/earnings`):** The API contract explicitly specifies: *"A learner's token must receive 403, not an empty result."* However, when signing in as `learner@example.test` and requesting `GET /me/earnings`, the server returns `200 OK` with `{ availableMinor: 0, pendingMinor: 0, ... }`. This occurs because `BL_Earnings_Controller` assigned `check_authenticated` as the permission callback instead of `check_instructor` (Defect 1 for Task 4).
-- **Task 3 & Task 4 (Missing server-side minimum withdrawal validation):** `BL_Earnings_Controller::create_withdrawal` checks whether amount exceeds balance (`insufficient_balance`) and if a pending payout exists (`withdrawal_in_progress`), but it never checks whether `amountMinor < self::MINIMUM_WITHDRAWAL_MINOR`. This is Defect 4 (validation) for Task 4. The frontend enforces this rule client-side using Zod and maps any server refusal directly to the amount field.
+What I did
 
-## 6. AI Tool Usage — required
+I implemented the login flow and the protected earnings experience. The login form posts to POST /auth/login and successful authentication is saved through the provided useAuthStore. The /earnings page reads the instructor earnings data from GET /me/earnings.
 
-**AI tools are allowed and expected.** We use them daily. Using them is not
-cheating. Not disclosing them is.
+Authentication handling
 
-**Which tools did you use?**
-Google Antigravity AI Assistant
+• I did not manually set the Authorization header in the feature code because the supplied Axios interceptor already owns that job.
 
-### 6a. Where AI was used
+• I completed the response interceptor so that a 401 clears invalid auth state.
 
-| Task | What AI produced | Accepted / rejected / modified |
-|---|---|---|
-| 1 — Course list | API client service, React Query hook, CourseCard & CourseGrid components, /courses page layout | Accepted with strict adherence to API contract, null vs 0 distinction, and money formatting |
-| 2 — Authentication | Response interceptor in client.ts, login form & hook, earnings query hook, earnings card, distinct error/signed-out guards | Accepted with clean separation of transport errors from 401/403 business refusals and query cache invalidation on sign-out |
-| 3 — Withdrawal form | Zod validation schema factory, createWithdrawal API client, useWithdrawalMutation, WithdrawalForm with field error mapping and idempotency key | Accepted with dynamic minimum from API, single payoutReference generation per attempt, and double-submit prevention |
-| 4 — PHP defects | Root cause analysis for permission callback, column name typo, unpublished course filter, and minimum withdrawal validation | Accepted minimal fixes adhering to specs and verified with before/after curl outputs |
-| 5 — Database | Investigation query for NULL vs 0, root-cause explanation of MySQL composite unique key NULL semantics, forward migration 002, and LEFT JOIN query | Accepted and verified in running MySQL instance on port 3307 |
-| 7 — Python | Exception handling for missing/null fee keys, paid status filtering, and exit code 2 on file I/O errors | Accepted and verified with payouts.json and missing file runs |
+• I kept transport failures separate from API refusals. If error.response is undefined, the UI reports an unreachable server rather than a permission problem.
 
-### 6b. What you accepted or rejected, and why
+• A 403 is treated as an authenticated-but-not-permitted state.
 
-*This is the most informative question on the page. "I accepted everything"
-tells us you did not review it. A rejection with a reason tells us you did.*
+• Signing out clears the stored auth state and removes the cached earnings query so private balance data is not left behind.
 
-- Accepted: Separation of concerns into API service layers (`api.ts`), React Query hooks (`hooks.ts`), validation schema (`schema.ts`), visual presentation components, and route pages.
-- Accepted: Dynamic validation schema passing `minimumWithdrawalMinor` directly from the API response to avoid hardcoded thresholds.
-- Accepted: Attaching server refusal codes (`below_minimum`, `insufficient_balance`, `withdrawal_in_progress`) directly to the amount input using React Hook Form's `setError("amount")`.
-- Accepted: Generating `payoutReference` strictly once per attempt in `onSubmit` and sending it in both the request body and `Idempotency-Key` header.
-- Accepted: Double-submit prevention disabling the submit button and inputs while in flight (`mutation.isPending`).
-- Modified: Streamlined the user-facing UX so users enter amounts in standard currency (Naira, e.g. ₦500.00) rather than confusing minor units, with the frontend converting `Math.round(amount * 100)` to minor units before dispatching to the API. Validation limits and error messages are formatted using `formatMoney`.
+Learner account observation
 
-### 6c. What you verified yourself, and how
+I tested the learner account against /me/earnings. Before the backend fix, it returned 200 with zero balances instead of the contract-required 403. I traced this to the route using check_authenticated instead of check_instructor. This became the permission defect fixed in Task 4.
 
-*Name the actual check — the request you ran, the query you executed, the screen
-you looked at. Not "I tested it."*
+What I personally verified
 
-- Ran TypeScript typechecker (`npm run typecheck`) in `frontend/` to ensure zero compilation or typing errors.
-- Verified in `class-bl-earnings-controller.php` that `POST /me/withdrawals` checks idempotency on `payout_reference` via SQL query `SELECT * FROM wp_bl_withdrawals WHERE instructor_id = %d AND payout_reference = %s`, confirming duplicate submissions safely return HTTP 200.
-- Verified that `queryClient.invalidateQueries({ queryKey: ["earnings"] })` runs on mutation success, triggering an immediate background refetch of the updated balance without a full page reload.
-- Verified all four Task 4 defects using `curl -i` before and after each code modification, saving complete HTTP headers and payloads to `evidence/task-4-curl.txt`.
-- Verified Task 5.1 in MySQL via `SELECT id, title, enrolment_count, ... average_rating ... FROM wp_bl_courses ORDER BY id;`.
-- Tested the Task 5.2 constraint failure by inserting duplicate rows with `cancelled_at = NULL`, applied migration `002_fix_withdrawal_reference.sql`, inspected `SHOW CREATE TABLE wp_bl_withdrawals`, and verified that the duplicate insert threw `ERROR 1062 (23000)`.
-- Verified Task 5.3 using `LEFT JOIN` on `wp_bl_enrolments` with `refunded_at IS NULL` and `COALESCE(SUM(...), 0)`, ensuring all 5 courses appear with zero revenue for non-enrolled courses.
-- Verified Python operational script `python/reconcile_earnings.py` against `payouts.json`, confirming correct per-instructor totals (`7: 84750`, `9: 79700`, `11: 30000`), verified exit code `0` on clean run, exit code `1` on usage error, and exit code `2` on missing/invalid file with `echo $?`.
+• Signed-out /earnings state.
 
-### 6d. Assumptions you made
+• Instructor login and earnings balance.
 
-*Anything AI assumed on your behalf that you then relied on, and anything you
-assumed about our brief.*
+• Learner behavior on /earnings.
 
-- Assumed `amountMinor` input in the form accepts an integer in minor units (e.g. 50000 for ₦500.00) matching the API contract and seed data conventions, while providing live equivalent currency feedback for user clarity.
-- Assumed server error codes from `POST /me/withdrawals` follow the documented API contract: `below_minimum`, `insufficient_balance`, and `withdrawal_in_progress`.
+• Authorization header present on authenticated requests.
 
-## 7. Assumptions and trade-offs
+• Sign out clears both stored auth and private query cache.
 
-- Idempotency key format is generated using `wd_${crypto.randomUUID()}` which conforms to the backend's regex `^[A-Za-z0-9_-]+$` and maximum length of 64 characters.
-- Double-submit protection uses mutation pending state rather than client-side timeouts.
+Evidence
 
-## 8. If this went to production tomorrow
+• evidence/task-2-signedout.png
 
-*What would worry you? What is untested, fragile, or a shortcut you took because
-of the time limit? Naming these scores positively — it is exactly the judgment
-we are hiring for.*
+• evidence/task-2-signedin.png
 
-- Optimistic UI updates: Currently we rely on React Query invalidation. Under heavy network latency, optimistic UI rollback or a confirmation step before submitting payouts would enhance reliability.
-- Multi-currency support: Currently assumes default currency matches instructor ledger (NGN). In multi-currency environments, conversion rates and currency locks must be validated server-side.
+• evidence/task-2-network.png
+
+AI usage for Task 2
+
+AI helped me review the interceptor flow, the login hook structure, and the distinction between 401, 403, and transport errors. I kept the existing interceptor ownership of the Bearer header instead of duplicating that logic in components, and I personally verified the Network behavior in the browser.
+
+TASK 3
+
+Withdrawal Form
+
+What I did
+
+I added the withdrawal form to /earnings using react-hook-form, Zod, and the installed resolver package. The validation limits come from the earnings API, so minimumWithdrawalMinor and availableMinor stay server-driven.
+
+Validation and user experience
+
+For the user-facing form, I chose normal Naira input instead of asking the user to think in raw minor units. The value is converted to an integer minor-unit amount before the API request is sent. The form checks that the amount is positive, at least the minimum returned by the API, and no more than the available balance.
+
+Server refusals and safe submission
+
+• below_minimum and insufficient_balance are attached to the amount field rather than shown only in a general banner.
+
+• The submit button and amount input are disabled while the mutation is pending to prevent double submission.
+
+• payoutReference is generated once per withdrawal attempt.
+
+• The same payoutReference is sent in the request body and as the Idempotency-Key header.
+
+• On success, I invalidate the earnings query and refetch the balance from the server.
+
+Why payoutReference is generated once
+
+The reference represents one logical withdrawal attempt. If the server processes the withdrawal but the response is lost, retrying with the same reference lets the backend recognise the original request. Generating a new reference on retry could make the server treat it as a second withdrawal and move the money twice.
+
+What I personally verified
+
+• Client-side rejection below the minimum.
+
+• A server refusal mapped back to the amount field.
+
+• A successful withdrawal.
+
+• Idempotency-Key present in the Network request.
+
+• Balance refresh after success.
+
+Evidence
+
+• evidence/task-3-validation.png
+
+• evidence/task-3-server-error.png
+
+• evidence/task-3-success.png
+
+• evidence/task-3-network.png
+
+AI usage for Task 3
+
+AI helped with the first pass of the Zod schema, mutation flow, field-level error mapping, and idempotency reasoning. I changed the proposed raw minor-unit input to normal Naira input because it is clearer for a real user, while still keeping the API contract in minor units. I personally verified the request headers, validation, success state, and refreshed balance.
+
+TASK 4
+
+WordPress / PHP Defects
+
+Approach
+
+I treated docs/API-CONTRACT.md as the authority and looked for the four narrow mismatches the brief described. I avoided broad rewrites and fixed each issue minimally, then verified it with real HTTP responses.
+
+Defect 1 — Permission
+
+What it was: GET /me/earnings checked only whether the caller was authenticated, not whether the caller was an instructor.
+
+Why it was wrong: A learner could access an instructor-only endpoint. The contract requires a learner to receive 403.
+
+What I changed: I changed the route permission callback from check_authenticated to check_instructor.
+
+How I proved it: Before the fix the learner received 200. After the fix the learner received 403, while the instructor still received 200.
+
+Defect 2 — Schema mismatch
+
+What it was: The course detail controller read lessons_total, but the schema and seed data use lesson_count.
+
+Why it was wrong: The missing property quietly became null and lessonCount was returned as 0.
+
+What I changed: I changed the controller to read lesson_count.
+
+How I proved it: GET /courses/1 returned lessonCount 0 before the fix and 12 after the fix.
+
+Defect 3 — API contract
+
+What it was: GET /courses did not filter by publication status, so the unpublished Advanced Laminated Dough course was returned.
+
+Why it was wrong: The public contract says unpublished courses must never be returned.
+
+What I changed: I added the published-course condition to the SQL query.
+
+How I proved it: Before the fix the response contained five courses including the unpublished one. After the fix it contained the four published courses only.
+
+Defect 4 — Validation
+
+What it was: The withdrawal endpoint did not enforce the minimum withdrawal amount.
+
+Why it was wrong: A valid-shaped request below the documented minimum could be accepted.
+
+What I changed: I added the minimum check before the balance check and return 422 with below_minimum.
+
+How I proved it: A below-minimum request was accepted before the fix and rejected with 422 after the fix.
+
+Evidence
+
+evidence/task-4-curl.txt contains the before-and-after curl output for all four defects.
+
+AI usage for Task 4
+
+AI helped me compare the controller and schema files against the contract and narrow the likely causes. I kept only the changes that matched the documented four defect categories and personally ran the before-and-after HTTP checks.
+
+TASK 5
+
+Database
+
+5.1 — NULL versus 0
+
+I queried every course and included both the values and explicit NULL checks. Pastry Fundamentals has NULL enrolment_count and NULL average_rating. Cake Decorating Basics has a genuine average_rating of 0.00. Advanced Laminated Dough has a genuine enrolment_count of 0 and a NULL rating.
+
+This matters because NULL means the value is not yet known or measured, while 0 means it was measured and the result was zero. Showing both as 0 would give the user the wrong information.
+
+5.2 — Withdrawal reference constraint
+
+I tested the existing unique key by inserting rows with the same instructor_id and payout_reference while cancelled_at was NULL. MySQL accepted the duplicates, which proved the index did not enforce the intended idempotency rule.
+
+The reason is that cancelled_at is part of the unique key and NULL values are allowed to repeat in this situation. Because active withdrawals naturally have cancelled_at = NULL, the old key could still allow duplicate active payout references.
+
+I created database/migrations/002_fix_withdrawal_reference.sql instead of editing 001_initial.sql because 001 had already been applied. A new forward-only migration updates existing databases without rewriting migration history.
+
+I removed the duplicate test rows before adding the corrected unique index, applied the migration, checked SHOW CREATE TABLE, and reran the duplicate insert. The second insert was rejected after the fix.
+
+5.3 — Join
+
+I used a LEFT JOIN from courses to enrolments, with refunded_at IS NULL in the join condition. That keeps every course in the result even when there is no matching non-refunded enrolment. An INNER JOIN would have removed zero-enrolment courses and failed the requirement.
+
+The final result showed Introduction to Bread Baking with two non-refunded enrolments and 9000 minor units of revenue. The other courses remained in the result with zero counts and zero revenue.
+
+Answer location
+
+answers/task-5.md contains the SQL and terminal output for the queries.
+
+AI usage for Task 5
+
+AI helped me review the NULL-versus-zero query, the unique-index behaviour, the forward migration, and the LEFT JOIN logic. I personally ran the SQL against the assessment database, copied the terminal output, applied the migration, and tested the duplicate insert again.
+
+TASK 6
+
+Infrastructure Incidents
+
+Incident 1 — Invisible deploy
+
+I would start with the cheapest checks. First I would hard refresh or use a private window to rule out browser cache. Then I would confirm that I am on the correct URL and environment. Next I would compare the deployed commit or image version with the commit that contains the fix. If the correct version is running, I would move to CDN, reverse proxy, or static asset caching and compare my response headers and loaded assets with the colleague who says it works.
+
+Incident 2 — 502 after deploy
+
+Because the only change reads a new configuration value, I would check that value first: whether it exists in the deployed environment, whether the key name and case are correct, and whether the value itself is valid. Then I would check application logs inside the running container. A container can be running while the process inside it is unhealthy. Next I would confirm the app is listening on the expected port and call the application directly, bypassing the reverse proxy. If the direct call works, I would focus on the proxy upstream configuration. If it fails too, I would stay with the application or configuration path.
+
+Incident 3 — Vanishing change
+
+The tool was installed inside a running container, so the change only existed in that one container. The next deployment replaced it with a fresh container created from the original image, which is why the tool disappeared. The correct fix is to put the dependency or configuration into source-controlled build files such as the Dockerfile, application dependency file, or environment configuration, then rebuild and redeploy.
+
+Answer location
+
+answers/task-6.md
+
+AI usage for Task 6
+
+AI helped me organise the diagnosis in a cheapest-first order. I kept the answers focused on what I would check, why I would check it, and what each step rules in or out.
+
+TASK 7
+
+Operational Script
+
+What happened before the fix
+
+I ran python3 reconcile_earnings.py payouts.json before changing anything and read the traceback. The script crashed with KeyError: 'fee_minor' because it assumed every record had that key.
+
+What I changed
+
+• I changed the fee handling so a missing or null fee value does not crash the script.
+
+• I made the reconciliation count only rows whose status is paid.
+
+• I added handling for unreadable or invalid JSON files so the script returns the documented exit code 2 instead of a raw traceback.
+
+fee_minor decision
+
+I treated a missing or null fee_minor as zero for this assessment because the supplied operational data still needs to be processed and I did not want to invent a fee that was not recorded. In a production accounting process I would also flag the record for review so that assumption is visible.
+
+What I personally verified
+
+• Successful run against payouts.json.
+
+• Successful process exit code.
+
+• Deliberately missing file case.
+
+• Missing file exits with code 2 after the fix.
+
+Evidence
+
+evidence/task-7-output.txt
+
+AI usage for Task 7
+
+AI helped me interpret the traceback and review the narrow fixes for missing/null fees, status filtering, and documented exit codes. I personally ran the script before and after the changes and checked the final exit code.
+
+Overall AI Disclosure
+
+I used Google Antigravity and ChatGPT during the assessment as coding and review assistants. I did not use AI output as proof that anything worked. I reviewed the suggested approach, kept the parts that matched the supplied contract and project structure, changed or rejected suggestions that did not fit, and then personally verified the result through browser checks, Network requests, curl responses, SQL output, and Python execution.
