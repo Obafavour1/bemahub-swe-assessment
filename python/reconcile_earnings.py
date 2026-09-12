@@ -21,8 +21,12 @@ import sys
 
 
 def load_payouts(path):
-    with open(path) as fh:
-        return json.load(fh)
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError) as err:
+        print(f"Error: could not read or parse file '{path}': {err}", file=sys.stderr)
+        sys.exit(2)
 
 
 def summarise(payouts):
@@ -38,9 +42,17 @@ def summarise(payouts):
     totals = {}
 
     for row in payouts:
+        # Fix 2: Only paid rows count towards the total
+        if row.get("status") != "paid":
+            continue
+
         instructor = row["instructor_id"]
         amount = row["amount_minor"]
-        fee = row["fee_minor"]
+
+        # Fix 1: Cope with real-world data where fee_minor is missing or null
+        fee = row.get("fee_minor")
+        if fee is None:
+            fee = 0
 
         net = amount - fee
 
@@ -52,10 +64,12 @@ def summarise(payouts):
 
 
 def main(argv):
+    # Exit 1 for usage error (wrong number of arguments)
     if len(argv) != 2:
         print("usage: reconcile_earnings.py <payouts.json>", file=sys.stderr)
         return 1
 
+    # Fix 3: Exits with 2 if file cannot be read or parsed (handled in load_payouts)
     payouts = load_payouts(argv[1])
     totals = summarise(payouts)
 

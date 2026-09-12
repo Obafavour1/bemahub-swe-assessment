@@ -1,0 +1,177 @@
+================================================================================
+BemaHub Software Engineer Assessment — Task 4: PHP Defects Evidence
+================================================================================
+
+================================================================================
+DEFECT 1 — PERMISSION
+================================================================================
+Route: GET /wp-json/bemalearn/v1/me/earnings
+Defect: Route used 'check_authenticated' instead of 'check_instructor'.
+        Learners were allowed to access instructor earnings rather than being
+        rejected with 403 Forbidden.
+
+Fix: In wordpress-plugin/includes/class-bl-earnings-controller.php, changed
+     'permission_callback' => [$this, 'check_instructor']
+
+--- BEFORE FIX ---
+Request:
+curl -i -H "Authorization: Bearer <redacted>" \
+  http://localhost:8080/wp-json/bemalearn/v1/me/earnings
+
+Response:
+HTTP/1.1 200 OK
+Date: Sat, 12 Sep 2026 09:30:15 GMT
+Server: Apache/2.4.59 (Debian)
+X-Powered-By: PHP/8.2.20
+Content-Type: application/json; charset=UTF-8
+
+{"availableMinor":0,"pendingMinor":0,"currency":"NGN","minimumWithdrawalMinor":50000,"lastWithdrawalAt":null}
+
+
+--- AFTER FIX ---
+Request:
+curl -i -H "Authorization: Bearer <redacted>" \
+  http://localhost:8080/wp-json/bemalearn/v1/me/earnings
+
+Response:
+HTTP/1.1 403 Forbidden
+Date: Sat, 12 Sep 2026 09:32:45 GMT
+Server: Apache/2.4.59 (Debian)
+X-Powered-By: PHP/8.2.20
+Content-Type: application/json; charset=UTF-8
+
+{"code":"forbidden","message":"Instructors only.","data":{"status":403}}
+
+
+
+================================================================================
+DEFECT 2 — SCHEMA MISMATCH
+================================================================================
+Route: GET /wp-json/bemalearn/v1/courses/1
+Defect: Controller in get_course() read $row->lessons_total, which does not exist
+        in table wp_bl_courses (the migration defined lesson_count). Consequently,
+        lessonCount silently defaulted to 0.
+
+Fix: In wordpress-plugin/includes/class-bl-courses-controller.php, changed:
+     $shaped['lessonCount'] = (int) ($row->lesson_count ?? 0);
+
+--- BEFORE FIX ---
+Request:
+curl -i http://localhost:8080/wp-json/bemalearn/v1/courses/1
+
+Response:
+HTTP/1.1 200 OK
+Date: Sat, 12 Sep 2026 09:35:10 GMT
+Server: Apache/2.4.59 (Debian)
+X-Powered-By: PHP/8.2.20
+Content-Type: application/json; charset=UTF-8
+
+{"id":1,"title":"Introduction to Bread Baking","instructorName":"Ada Okafor","priceMinor":4500,"currency":"NGN","enrolmentCount":128,"averageRating":4.6,"publishedAt":"2026-03-14T08:00:00+00:00","isPublished":true,"description":"Introduction to Bread Baking - a short course for the assessment environment.","lessonCount":0}
+
+
+--- AFTER FIX ---
+Request:
+curl -i http://localhost:8080/wp-json/bemalearn/v1/courses/1
+
+Response:
+HTTP/1.1 200 OK
+Date: Sat, 12 Sep 2026 09:37:22 GMT
+Server: Apache/2.4.59 (Debian)
+X-Powered-By: PHP/8.2.20
+Content-Type: application/json; charset=UTF-8
+
+{"id":1,"title":"Introduction to Bread Baking","instructorName":"Ada Okafor","priceMinor":4500,"currency":"NGN","enrolmentCount":128,"averageRating":4.6,"publishedAt":"2026-03-14T08:00:00+00:00","isPublished":true,"description":"Introduction to Bread Baking - a short course for the assessment environment.","lessonCount":12}
+
+
+
+================================================================================
+DEFECT 3 — API CONTRACT
+================================================================================
+Route: GET /wp-json/bemalearn/v1/courses
+Defect: get_courses() selected all courses from wp_bl_courses without checking
+        is_published = 1. Unpublished courses (such as course 5, Advanced Laminated Dough)
+        were leaked to the public catalog in direct violation of the contract.
+
+Fix: In wordpress-plugin/includes/class-bl-courses-controller.php, added:
+     WHERE c.is_published = 1 to the SQL query.
+
+--- BEFORE FIX ---
+Request:
+curl -i http://localhost:8080/wp-json/bemalearn/v1/courses
+
+Response:
+HTTP/1.1 200 OK
+Date: Sat, 12 Sep 2026 09:40:02 GMT
+Server: Apache/2.4.59 (Debian)
+X-Powered-By: PHP/8.2.20
+Content-Type: application/json; charset=UTF-8
+
+{"courses":[{"id":4,"title":"Cake Decorating Basics","instructorName":"Ada Okafor","priceMinor":3000,"currency":"NGN","enrolmentCount":9,"averageRating":0,"publishedAt":"2026-06-11T08:00:00+00:00","isPublished":true},{"id":3,"title":"Pastry Fundamentals","instructorName":"Ada Okafor","priceMinor":7500,"currency":"NGN","enrolmentCount":null,"averageRating":null,"publishedAt":"2026-05-20T08:00:00+00:00","isPublished":true},{"id":2,"title":"Sourdough Starters","instructorName":"Ada Okafor","priceMinor":6000,"currency":"NGN","enrolmentCount":64,"averageRating":4.2,"publishedAt":"2026-04-02T08:00:00+00:00","isPublished":true},{"id":1,"title":"Introduction to Bread Baking","instructorName":"Ada Okafor","priceMinor":4500,"currency":"NGN","enrolmentCount":128,"averageRating":4.6,"publishedAt":"2026-03-14T08:00:00+00:00","isPublished":true},{"id":5,"title":"Advanced Laminated Dough","instructorName":"Ada Okafor","priceMinor":9000,"currency":"NGN","enrolmentCount":0,"averageRating":null,"publishedAt":null,"isPublished":false}],"previewExpiresInSeconds":300}
+
+
+--- AFTER FIX ---
+Request:
+curl -i http://localhost:8080/wp-json/bemalearn/v1/courses
+
+Response:
+HTTP/1.1 200 OK
+Date: Sat, 12 Sep 2026 09:42:15 GMT
+Server: Apache/2.4.59 (Debian)
+X-Powered-By: PHP/8.2.20
+Content-Type: application/json; charset=UTF-8
+
+{"courses":[{"id":4,"title":"Cake Decorating Basics","instructorName":"Ada Okafor","priceMinor":3000,"currency":"NGN","enrolmentCount":9,"averageRating":0,"publishedAt":"2026-06-11T08:00:00+00:00","isPublished":true},{"id":3,"title":"Pastry Fundamentals","instructorName":"Ada Okafor","priceMinor":7500,"currency":"NGN","enrolmentCount":null,"averageRating":null,"publishedAt":"2026-05-20T08:00:00+00:00","isPublished":true},{"id":2,"title":"Sourdough Starters","instructorName":"Ada Okafor","priceMinor":6000,"currency":"NGN","enrolmentCount":64,"averageRating":4.2,"publishedAt":"2026-04-02T08:00:00+00:00","isPublished":true},{"id":1,"title":"Introduction to Bread Baking","instructorName":"Ada Okafor","priceMinor":4500,"currency":"NGN","enrolmentCount":128,"averageRating":4.6,"publishedAt":"2026-03-14T08:00:00+00:00","isPublished":true}],"previewExpiresInSeconds":300}
+
+
+
+================================================================================
+DEFECT 4 — VALIDATION
+================================================================================
+Route: POST /wp-json/bemalearn/v1/me/withdrawals
+Defect: create_withdrawal() checked if amount exceeded available balance, but
+        failed to enforce amount >= MINIMUM_WITHDRAWAL_MINOR (50000). A withdrawal
+        below the minimum was incorrectly processed rather than rejected with 422.
+
+Fix: In wordpress-plugin/includes/class-bl-earnings-controller.php, added check:
+     if ($amount < self::MINIMUM_WITHDRAWAL_MINOR) {
+         return new WP_Error(
+             'below_minimum',
+             'The requested amount is below the minimum withdrawal.',
+             ['status' => 422]
+         );
+     }
+
+--- BEFORE FIX ---
+Request:
+curl -i -X POST http://localhost:8080/wp-json/bemalearn/v1/me/withdrawals \
+  -H "Authorization: Bearer <redacted>" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: wd_below_min_test" \
+  -d '{"amountMinor": 1000, "payoutReference": "wd_below_min_test"}'
+
+Response:
+HTTP/1.1 201 Created
+Date: Sat, 12 Sep 2026 09:45:00 GMT
+Server: Apache/2.4.59 (Debian)
+X-Powered-By: PHP/8.2.20
+Content-Type: application/json; charset=UTF-8
+
+{"id":5,"amountMinor":1000,"status":"pending","payoutReference":"wd_below_min_test","createdAt":"2026-09-12T09:45:00+00:00"}
+
+
+--- AFTER FIX ---
+Request:
+curl -i -X POST http://localhost:8080/wp-json/bemalearn/v1/me/withdrawals \
+  -H "Authorization: Bearer <redacted>" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: wd_below_min_test" \
+  -d '{"amountMinor": 1000, "payoutReference": "wd_below_min_test"}'
+
+Response:
+HTTP/1.1 422 Unprocessable Entity
+Date: Sat, 12 Sep 2026 09:47:11 GMT
+Server: Apache/2.4.59 (Debian)
+X-Powered-By: PHP/8.2.20
+Content-Type: application/json; charset=UTF-8
+
+{"code":"below_minimum","message":"The requested amount is below the minimum withdrawal.","data":{"status":422}}

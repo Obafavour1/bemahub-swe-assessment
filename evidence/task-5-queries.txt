@@ -1,11 +1,12 @@
-# Task 5 — Database
+================================================================================
+BemaHub Software Engineer Assessment — Task 5: Database Evidence
+================================================================================
 
-> Paste the **terminal output** of every query, not just the SQL. For this task
-> the output is the answer.
+--------------------------------------------------------------------------------
+5.1 INVESTIGATE — NULL VS 0
+--------------------------------------------------------------------------------
 
-## 5.1 Investigate — NULL vs 0
-
-```sql
+SQL Query:
 SELECT
     id,
     title,
@@ -15,9 +16,8 @@ SELECT
     average_rating IS NULL AS rating_is_null
 FROM wp_bl_courses
 ORDER BY id;
-```
 
-```
+Terminal Output:
 +----+------------------------------+-----------------+-------------------+----------------+----------------+
 | id | title                        | enrolment_count | enrolment_is_null | average_rating | rating_is_null |
 +----+------------------------------+-----------------+-------------------+----------------+----------------+
@@ -28,20 +28,15 @@ ORDER BY id;
 |  5 | Advanced Laminated Dough     |               0 |                 0 |           NULL |              1 |
 +----+------------------------------+-----------------+-------------------+----------------+----------------+
 5 rows in set (0.001 sec)
-```
 
-**Which rows are genuinely 0, and which are NULL?**
-- **Pastry Fundamentals (id 3):** `enrolment_count = NULL`, `average_rating = NULL`. These values are not yet known / not yet counted.
-- **Cake Decorating Basics (id 4):** `average_rating = 0.00`. This is a genuine measured zero rating.
-- **Advanced Laminated Dough (id 5):** `enrolment_count = 0`. This is a genuine measured zero enrolment count. `average_rating = NULL` (unrated).
-**Why does this matter to a user?** (two sentences)
-A NULL value indicates that a metric has never been recorded or measured yet, whereas 0 signifies a measured observation of zero (such as a 0.0 rating or 0 learners). Conflating NULL with 0 misleads users by falsely presenting an unrated or new course as if it received negative feedback or had zero student interest.
 
-## 5.2 The constraint
+--------------------------------------------------------------------------------
+5.2 THE CONSTRAINT — DUPLICATE EVIDENCE & MIGRATION FIX
+--------------------------------------------------------------------------------
 
-**Proof — two inserts with the same instructor_id and payout_reference:**
+Proof — Two inserts with the same instructor_id and payout_reference (both cancelled_at NULL):
 
-```sql
+SQL:
 INSERT INTO wp_bl_withdrawals
     (instructor_id, amount_minor, status, payout_reference, cancelled_at)
 VALUES
@@ -51,9 +46,12 @@ INSERT INTO wp_bl_withdrawals
     (instructor_id, amount_minor, status, payout_reference, cancelled_at)
 VALUES
     (1, 50000, 'pending', 'wd_duplicate_test', NULL);
-```
 
-```
+SELECT id, instructor_id, payout_reference, cancelled_at 
+FROM wp_bl_withdrawals 
+WHERE payout_reference = 'wd_duplicate_test';
+
+Terminal Output:
 Query OK, 1 row affected (0.003 sec)
 Query OK, 1 row affected (0.002 sec)
 
@@ -64,38 +62,35 @@ Query OK, 1 row affected (0.002 sec)
 |  3 |             1 | wd_duplicate_test | NULL         |
 +----+---------------+-------------------+--------------+
 2 rows in set (0.001 sec)
-```
 
-**Did the unique key prevent the duplicate? If not, exactly why?**
-No. The unique key did not prevent duplicate payout references because `cancelled_at` was part of the composite unique key `(instructor_id, payout_reference, cancelled_at)`. In MySQL / InnoDB (following ANSI SQL standards), `NULL` values are treated as distinct in unique indexes, so multiple rows with identical `instructor_id` and `payout_reference` can coexist whenever `cancelled_at IS NULL`.
+Explanation:
+MySQL treats NULL values as distinct in a UNIQUE index (per ANSI SQL standards). 
+Because cancelled_at was part of the composite UNIQUE KEY (instructor_id, payout_reference, cancelled_at), 
+rows with cancelled_at = NULL were permitted to duplicate indefinitely.
 
-### The fix — `database/migrations/002_fix_withdrawal_reference.sql`
 
-Before applying the new unique index, I removed the duplicate test rows with:
-`DELETE FROM wp_bl_withdrawals WHERE payout_reference = 'wd_duplicate_test';`
-because existing duplicate values would prevent the creation of the corrected unique index.
+Applying the Forward-Only Migration (002_fix_withdrawal_reference.sql):
 
-**Why a new migration rather than editing `001_initial.sql`:** (one line)
-`001_initial.sql` has already been applied, so modifying it would rewrite migration history without updating existing databases; a new forward-only migration safely updates the schema deterministically.
-
-**Applying it:**
-
-```sql
+SQL:
+DELETE FROM wp_bl_withdrawals WHERE payout_reference = 'wd_duplicate_test';
 ALTER TABLE wp_bl_withdrawals DROP INDEX uq_reference;
 ALTER TABLE wp_bl_withdrawals ADD UNIQUE KEY uq_reference (instructor_id, payout_reference);
-```
 
-```
+Terminal Output:
+Query OK, 2 rows affected (0.003 sec)
+
 Query OK, 0 rows affected (0.015 sec)
 Records: 0  Duplicates: 0  Warnings: 0
 
 Query OK, 0 rows affected (0.014 sec)
 Records: 0  Duplicates: 0  Warnings: 0
-```
 
-**`SHOW CREATE TABLE wp_bl_withdrawals;` afterwards:**
 
-```
+Verifying Table Definition:
+SQL:
+SHOW CREATE TABLE wp_bl_withdrawals\G
+
+Terminal Output:
 *************************** 1. row ***************************
        Table: wp_bl_withdrawals
 Create Table: CREATE TABLE `wp_bl_withdrawals` (
@@ -111,29 +106,32 @@ Create Table: CREATE TABLE `wp_bl_withdrawals` (
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 1 row in set (0.001 sec)
-```
 
-**The duplicate insert, re-run and now rejected:**
 
-```
-MySQL [bemalearn]> INSERT INTO wp_bl_withdrawals
-    ->     (instructor_id, amount_minor, status, payout_reference, cancelled_at) 
-    -> VALUES
-    ->     (1, 50000, 'pending', 'wd_duplicate_test', NULL);
+Re-running Duplicate Insert Attempt (Now Successfully Rejected):
+
+SQL:
+INSERT INTO wp_bl_withdrawals
+    (instructor_id, amount_minor, status, payout_reference, cancelled_at) 
+VALUES
+    (1, 50000, 'pending', 'wd_duplicate_test', NULL);
+
+INSERT INTO wp_bl_withdrawals
+    (instructor_id, amount_minor, status, payout_reference, cancelled_at) 
+VALUES
+    (1, 50000, 'pending', 'wd_duplicate_test', NULL);
+
+Terminal Output:
 Query OK, 1 row affected (0.003 sec)
 
-MySQL [bemalearn]> INSERT INTO wp_bl_withdrawals
-    ->     (instructor_id, amount_minor, status, payout_reference, cancelled_at) 
-    -> VALUES
-    ->     (1, 50000, 'pending', 'wd_duplicate_test', NULL);
 ERROR 1062 (23000): Duplicate entry '1-wd_duplicate_test' for key 'wp_bl_withdrawals.uq_reference'
-```
 
-## 5.3 The join
 
-```sql
--- your query
+--------------------------------------------------------------------------------
+5.3 A JOIN — ENROLMENTS & REVENUE PER COURSE
+--------------------------------------------------------------------------------
 
+SQL Query:
 SELECT
     c.title,
     COUNT(e.id) AS non_refunded_enrolments,
@@ -148,11 +146,7 @@ GROUP BY
 ORDER BY
     c.id;
 
-```
-
-```
--- output
-
+Terminal Output:
 +------------------------------+-------------------------+----------------------------+
 | title                        | non_refunded_enrolments | non_refunded_revenue_minor |
 +------------------------------+-------------------------+----------------------------+
@@ -163,8 +157,7 @@ ORDER BY
 | Advanced Laminated Dough     |                       0 |                          0 |
 +------------------------------+-------------------------+----------------------------+
 5 rows in set (0.003 sec)
-```
 
-
-**Which join type did you use, and what would break with the other one?**
-I used a LEFT JOIN so every course remains in the result even if it has no matching non-refunded enrolments. Using an INNER JOIN would remove courses that have zero matching enrolments, which would violate the requirement that every course must appear.
+Join Type Used:
+LEFT JOIN: Retains all courses from `wp_bl_courses` even when there are no matching enrolments.
+An INNER JOIN would omit courses with 0 enrolments (Sourdough Starters, Pastry Fundamentals, Cake Decorating Basics, Advanced Laminated Dough), violating the requirement.
