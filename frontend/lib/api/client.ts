@@ -11,7 +11,7 @@ import axios from "axios";
 import { getStoredToken } from "@/lib/auth/authStore";
 
 const baseURL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/wp-json/bemalearn/v1";
+  process.env.NEXT_PUBLIC_API_URL ?? process.env.API_URL
 
 export const api = axios.create({
   baseURL,
