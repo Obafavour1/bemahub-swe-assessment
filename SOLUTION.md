@@ -307,3 +307,26 @@ AI helped me interpret the traceback and review the narrow fixes for missing/nul
 Overall AI Disclosure
 
 I used Google Antigravity and ChatGPT during the assessment as coding and review assistants. I did not use AI output as proof that anything worked. I reviewed the suggested approach, kept the parts that matched the supplied contract and project structure, changed or rejected suggestions that did not fit, and then personally verified the result through browser checks, Network requests, curl responses, SQL output, and Python execution.
+
+
+Examples of suggestions I changed or rejected
+
+• I rejected hiding the unpublished course with a frontend filter because that would mask the backend contract defect.
+
+• I did not manually attach Authorization headers in feature code because the existing Axios interceptor already owned that responsibility.
+
+• I changed the withdrawal form from raw minor-unit input to normal Naira input and converted to minor units before the request.
+
+• I kept Task 4 fixes narrow instead of rewriting the controllers because the brief asked for exactly four minimal fixes.
+
+What I would improve for production
+
+• Automated permission tests for instructor-only financial endpoints.
+
+• Integration tests for idempotent withdrawals and duplicate references.
+
+• A visible build/version identifier so deployed code can be tied to a commit or image.
+
+• Structured monitoring and logging around payout failures, auth failures, and configuration errors.
+
+• Stronger production accounting controls around missing financial fields and multi-currency handling.
