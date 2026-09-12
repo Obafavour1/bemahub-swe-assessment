@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
+import { Navigation } from "@/components/Navigation";
 
 export const metadata: Metadata = {
   title: "Bema Learn",
@@ -12,11 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="min-h-screen bg-slate-50 text-slate-900">
         <Providers>
-          <header className="border-b bg-white">
-            <div className="mx-auto max-w-4xl px-6 py-4">
-              <h1 className="text-lg font-semibold">Bema Learn</h1>
-            </div>
-          </header>
+          <Navigation />
           <main className="mx-auto max-w-4xl px-6 py-8">{children}</main>
         </Providers>
       </body>
