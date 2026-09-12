@@ -65,4 +65,12 @@ total non-refunded revenue in minor units.
 **Courses with zero enrolments must still appear**, showing 0.
 
 - Provide the query and its output.
+
+
+
+
+
+
+
 - Say which join type you used and what would break with the other one.
+
