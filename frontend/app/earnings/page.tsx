@@ -12,43 +12,23 @@ export default function EarningsPage() {
   const user = useAuthStore((s) => s.user);
   const { data, isLoading, isError, error, refetch } = useEarnings();
 
-  // Case 1: User is signed out.
-  // Requirement 2: Must NOT look like an empty success, nor display 0.
-  // Show a truthful message: "Sign in required."
-  if (!token) {
+  // Case 1: Signed out or 401 Unauthenticated
+  // Requirement: Displays an explicit error state rather than empty success or false zero.
+  if (!token || (isError && error?.response?.status === 401)) {
+    const errorMsg =
+      error?.response?.data?.message ||
+      "Sign in required: You must be signed in to access earnings.";
+
     return (
-      <div className="space-y-6 max-w-xl mx-auto py-8">
-        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm space-y-4">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-600">
-            <svg
-              className="h-6 w-6"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-              />
-            </svg>
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">Sign in required</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              You must be signed in as an instructor to view earnings and manage withdrawals.
-            </p>
-          </div>
-          <div>
-            <Link
-              href="/login"
-              className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition"
-            >
-              Sign In to Continue
-            </Link>
-          </div>
+      <div className="py-8 space-y-4 max-w-xl mx-auto">
+        <StatusMessage state="error" message={errorMsg} />
+        <div className="text-center">
+          <Link
+            href="/login"
+            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition"
+          >
+            Sign In to Continue
+          </Link>
         </div>
       </div>
     );

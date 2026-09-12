@@ -16,12 +16,9 @@ export const EARNINGS_QUERY_KEY = ["earnings"] as const;
  * 2. Does not retry on 401 or 403 authorization refusals.
  */
 export function useEarnings() {
-  const token = useAuthStore((s) => s.token);
-
   return useQuery<Earnings, AxiosError<{ code?: string; message?: string }>>({
     queryKey: EARNINGS_QUERY_KEY,
     queryFn: fetchEarnings,
-    enabled: !!token,
     retry: (failureCount, error) => {
       // Never retry on 401 (unauthenticated) or 403 (forbidden)
       const status = error.response?.status;
