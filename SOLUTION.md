@@ -41,6 +41,33 @@ In TanStack React Query (`useCourses` hook), `previewExpiresInSeconds` returned 
 2. **`refetchInterval`**: Set to `previewExpiresInSeconds * 1000`. Once the preview window expires, React Query automatically triggers a background poll to fetch the updated catalog data so learners and instructors never see stale pricing, enrolments, or publication statuses.
 3. **UX Controls**: The UI also provides an explicit "Refresh" button triggering `refetch()` for on-demand user revalidation, along with a subtle TTL indicator.
 
+**Task 2:** Authentication, Session Interceptors & Error Isolation
+
+- **What Was Implemented:**
+  - `/login` route (`frontend/app/login/page.tsx`) with `LoginForm` posting credentials to `POST /auth/login`.
+  - Dynamic navigation (`components/Navigation.tsx`): hides "Sign In" when authenticated, shows "Earnings", instructor name, and "Sign Out". Hides "Earnings" when unauthenticated.
+  - Route guards: `/login` automatically redirects signed-in users to `/earnings`. Unauthenticated visits to `/earnings` trigger `GET /me/earnings` and render the house-style error state (`StatusMessage state="error"`).
+  - Protected `/earnings` view: renders available balance, pending balance, and dynamic minimum withdrawal threshold using `formatMoney()`.
+- **How Auth State Is Stored:**
+  - Auth state is managed via Zustand in `lib/auth/authStore.ts` and synced to `localStorage` (`bl_token` and `bl_user`).
+  - Hydrated on application mount in `app/providers.tsx` (`useAuthStore.getState().hydrate()`) to preserve sessions across page refreshes.
+  - The token is never manually written to headers in UI components; the Axios request interceptor reads `getStoredToken()` and automatically attaches `Authorization: Bearer <token>`.
+- **How the Interceptor Works:**
+  - *Request Interceptor:* Injects `Bearer <token>` on all outgoing requests if present in `localStorage`.
+  - *Response Interceptor (`lib/api/client.ts`):*
+    - Isolates transport failures (`!error.response`) so offline or DNS/server crashes are not misreported as credential errors.
+    - Intercepts `401 Unauthorized` responses and automatically calls `useAuthStore.getState().signOut()` to purge invalid or expired credentials.
+- **Distinguishing 401, 403, and Transport Failure:**
+  - *Transport Failure (`!error.response`):* `error.response` is `undefined`. The UI reports that the backend server is unreachable.
+  - *401 Unauthorized (`status === 401`):* Unauthenticated or expired session. The page renders an explicit error (`StatusMessage state="error"`: *"Sign in to continue."*) with a direct "Sign In to Continue" button.
+  - *403 Forbidden (`status === 403`):* Authenticated but lacking permission (e.g. learner role). Displays an access restriction notice.
+- **Learner Account Observation (Contract Mismatch):**
+  - Logging in with `learner@example.test` and querying `GET /me/earnings` returned **`200 OK`** with zero balance instead of the contract-mandated **`403 Forbidden`**.
+  - Traced in `class-bl-earnings-controller.php`: line 24 sets `'permission_callback' => [$this, 'check_authenticated']` instead of `[$this, 'check_instructor']`. This is Defect 1 (permission) for Task 4.
+- **Sign Out Verification:**
+  - Clicking "Sign Out" executes `useSignOut()`, which purges `useAuthStore` (`localStorage`) AND calls `queryClient.removeQueries({ queryKey: ["earnings"] })`.
+  - Verified that `/earnings` immediately reverts to the red error state (`StatusMessage state="error"`), cache is completely emptied, and previous balances are never revealed.
+
 **Task 3:** Why must `payoutReference` be generated once per attempt rather than regenerated on retry? What would break?
 
 In financial and transactional systems, `payoutReference` acts as an **idempotency key**. If the network disconnects after the server has processed the withdrawal and deducted the ledger, but before the HTTP response reaches the browser, the client encounters an in-flight uncertainty. If the client generated a new `payoutReference` on retry, the backend would treat it as a distinct, novel withdrawal request and move money a second time (double-payout). 
