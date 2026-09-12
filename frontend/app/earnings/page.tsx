@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useAuthStore } from "@/lib/auth/authStore";
 import { useEarnings } from "@/components/earnings/hooks";
 import { EarningsCard } from "@/components/earnings/components/EarningsCard";
+import { WithdrawalForm } from "@/components/earnings/WithdrawalForm";
 import { StatusMessage } from "@/components/StatusMessage";
 
 export default function EarningsPage() {
@@ -149,9 +150,18 @@ export default function EarningsPage() {
 
   // Case 4: Success
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Main Earnings Card */}
       {data && <EarningsCard earnings={data} />}
+
+      {/* Withdrawal Form */}
+      {data && (
+        <WithdrawalForm
+          availableMinor={data.availableMinor}
+          minimumWithdrawalMinor={data.minimumWithdrawalMinor}
+          currency={data.currency}
+        />
+      )}
     </div>
   );
 }

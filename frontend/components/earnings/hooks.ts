@@ -1,8 +1,8 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchEarnings } from "./api";
-import { Earnings } from "@/lib/types/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createWithdrawal, CreateWithdrawalPayload, fetchEarnings } from "./api";
+import { Earnings, Withdrawal } from "@/lib/types/api";
 import { useAuthStore } from "@/lib/auth/authStore";
 import { AxiosError } from "axios";
 
@@ -27,6 +27,31 @@ export function useEarnings() {
       const status = error.response?.status;
       if (status === 401 || status === 403) return false;
       return failureCount < 2;
+    },
+  });
+}
+
+/**
+ * Mutation hook for requesting a withdrawal.
+ *
+ * Requirements addressed:
+ * 1. Executes POST /me/withdrawals.
+ * 2. On success, automatically invalidates the earnings query so the displayed
+ *    balance is refetched and refreshed from the API.
+ */
+export function useWithdrawalMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    Withdrawal,
+    AxiosError<{ code?: string; message?: string }>,
+    CreateWithdrawalPayload
+  >({
+    mutationFn: createWithdrawal,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: EARNINGS_QUERY_KEY,
+      });
     },
   });
 }
